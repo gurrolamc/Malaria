@@ -1,0 +1,164 @@
+####DATA IMPORT AND CLEANING FOR MALARIA PROJECT
+
+rm(list=ls())
+install.packages("XML")
+install.packages("dplyr")
+install.packages("EpiWeek")
+install.packages("data.table")
+library(XML)
+library(dplyr)
+library(EpiWeek)
+library(rgdal)
+library(sp)
+library(maptools)
+library(data.table)
+library(readr)
+
+#url where text files are located
+url <- "http://rap.ucar.edu/staff/monaghan/colborn/mozambique/daily/v2/"
+doc <- htmlParse(url)
+
+#extracting links
+links <- xpathSApply(doc, "//a/@href") 
+
+#susbetting only necessary links
+links1 <- as.data.frame(links[6:147]) 
+free(doc)
+
+#identifying the links that are needed; excluding parent directory
+wanted <- links[grepl("fldas_daily", links)] 
+
+#combining URL with the text file names
+GetMe <- paste(url, wanted, sep = "") 
+
+#subsetting test vars
+var <- links1[c(1:142), 1] 
+
+#extracting district names
+remove <- c("_fldas.*|_ZAM|_NIA|_CAB|_NAM|_GAZ|_INH|_SOF|_MAN|_MACIA|_MAP|_TET|_")
+var1 <- (gsub(remove, " ", var))
+var1[var1 =="CIDADE DE E  " ] <- "CIDADE DE TETE" ##updating variable name
+var1 <-trimws(var1, "r") #removing white space on to ensure ability to merge
+
+#importing all files
+ll <- lapply(seq_along(GetMe),function(x) read.table(GetMe[x], header = FALSE, skip=3, dec= ".", stringsAsFactors = T)) 
+
+#binding rows
+data <- dplyr::bind_rows(ll, .id= "import_no") 
+
+#making copy of data
+data1 <- data 
+
+#creating a copy of import order var and converting to factor
+data1$district2<- as.factor(data1$import_no) 
+
+#applying district names to var
+levels(data1$district2)<- var1 
+
+#ensuring district names were applied
+#table(data1$district2) 
+
+#adding column names 
+colnames(data1) <- c( "import_no", "year", "month", "day", "raint", "tavg", "rh", "sd", "psfc", "District") 
+
+##need an epi week variable to align with incidence and intervention data
+data1$date <- as.Date(with(data1, paste(year, month, day,sep="-")), "%Y-%m-%d") #creating date variable
+data1$yrweek <- lapply(data1$date, function(x) dateToEpiweek(x, format="%Y-%m-%d"))
+
+##extracting epi week and year assigning it to new variables
+data1$Epiweek<- sapply(data1$yrweek, function(x) x[[2]])
+data1$Epiyear<- sapply(data1$yrweek, function(x) x[[1]])
+
+# standardized values #
+data1$normRain <- (data1$raint-mean(data1$raint))/sd(data1$raint)
+data1$normTavg <- (data1$tavg-mean(data1$tavg))/sd(data1$tavg)
+data1$normrh <- (data1$rh-mean(data1$rh))/sd(data1$rh)
+
+##removing year, month, day, and yrwk vars
+data2 <- data1[-c(2:4, 12)]
+
+#################################################################################################################
+###IMPORTING INCIDENCE DATA
+#install.packages("read")
+
+##for mac
+incidence <- read.csv("/Volumes/Lexar/R & Python final project/incidence.csv", header = T)
+
+##sorting by district code, year, and epi week
+incidence[with(incidence, order(incidence$DISTCODE, incidence$Epiyear, incidence$Epiweek)),]
+
+## identifying district names
+dists <- unique(incidence$District)
+
+##removing spaces and special characters
+remove2 <- c("-|  | - ")
+incidence$districtcopy <- incidence$District #making a copy of var to ensure names are updated correctly
+incidence$District <- gsub(remove2, " ", incidence$District ) #updating district var
+
+##removing districtcopy
+incidence2 <- incidence[-c(12)]
+
+##merging incidence and weather frames
+weath_inc <- merge(incidence2, data2, by= c("District", "Epiyear", "Epiweek"), all=T)
+
+##creating date variable 
+#weath_inc$dates <- epiweekToDate(weath_inc$Epiyear, weath_inc$Epiweek)[[1]]
+
+###calculating incidence as (cases/pop)*1000
+weath_inc$inci1k <- (weath_inc$cases/weath_inc$u5total)*1000
+
+
+##################################################################################################################
+##IMPORTING INTERVENTION DATA
+intervention <- read_csv("/Volumes/Lexar/R & Python final project/intervention.csv")
+
+##creating protection variables for ITN and IRS
+intervention$IRSprot <- ifelse(is.na(intervention$IRSyear) & (is.na(intervention$IRSepiWeek)), NA, 1)
+intervention$ITNprot <- ifelse(is.na(intervention$ITNyear) & (is.na(intervention$ITNepiWeek)), NA, 1)
+
+##subsetting IRS data 
+IRS <- intervention[c(1:3,6)]
+IRS <-rename(IRS,Epiyear =  IRSy›ear, Epiweek = IRSepiWeek ) ##renaming vars to match weath_inc file
+##merge IRS with weather and incidence 
+temp2 <- merge( IRS, weath_inc, by = c("DISTCODE","Epiyear","Epiweek"), all=T)
+
+##subsetting ITN data
+ITN <- intervention[c(1, 4:5, 7)]
+ITN<- rename(ITN,Epiyear =  ITNyear, Epiweek = ITNepiWeek  )
+
+##merge IRS with temp2
+temp3 <- merge(ITN, temp2, by = c("DISTCODE","Epiyear","Epiweek"), all=T)
+temp3$dates <- epiweekToDate(temp3$Epiyear, temp3$Epiweek)[[1]] # Create date column to check dates
+
+# Calculation for IRS AND ITN DECAY
+
+IRSmult = exp(-(2*log(0.75)/-(365/7)))
+ITNmult = exp(-(log(0.60)/-(365/7 * 2)))
+
+####DIDN'T WORK :/ 
+temp4 <- temp3 %>% 
+  select(-dates) %>%
+  group_by(DISTCODE) %>%
+  mutate(IRSprotn= ifelse(IRSprot == 1, 1, lag(cumsum(IRSprot),k=1, default = 0)),
+         IRSprotn= ifelse(IRSprot == 1 & IRSprotn == 1, 1, ifelse(IRSprotn == 0, 0,IRSmult^(cumsum(IRSprotn)))),
+         ITNprotn= ifelse(ITNprot == 1, 1, lag(cumsum(ITNprot),k=1, default = 0)),
+         ITNprotn= ifelse(ITNprot == 1 & ITNprotn == 1, 1, ifelse(ITNprotn == 0, 0,ITNmult^(cumsum(ITNprotn)))))
+
+
+
+##need to convert data frame to data table
+temp5<- as.data.table(temp4)
+
+##adding 2, 4 and 8 week lag
+final <- cbind(temp5, temp5[, shift(.SD, c(2,4,8), fill=NA, give.names = TRUE), .SDcols = c('tavg','raint','rh','sd','psfc')])
+               
+
+###setting directory to save files
+setwd("/Volumes/Lexar/R & Python final project")
+
+###saving weather, intervention, and incidence data
+save(data2, file="Weather")
+save(incidence2, file="incidence")
+save(intervention, file="intervention")
+save(final, file="allmerged")
+save(poly1, file="poly1")
