@@ -1,0 +1,69 @@
+##3. SPATIAL DATA
+install.packages("tmap")
+library(RColorBrewer)
+library(sp)
+library(maptools) 
+library(lattice)
+library(latticeExtra) # For layer()
+library(rgdal)
+library(tmap)
+
+##load data
+load("/Volumes/Lexar/R & Python final project/allmerged")
+merged <- final
+
+#####SPATIAL DATA
+poly1 <- readShapePoly('/Volumes/Lexar/R & Python final project/Moz_admin2.shp', IDvar="DISTCODE")
+#poly2 <- readOGR("/Volumes/Lexar/R & Python final project/", "Moz_admin2")
+
+##head(poly1@data, 2) #looking at data slot for poly file
+
+plot(poly1) ##basic plot that creates map
+
+##aggregating cases, and avgs of vars by district code to prepare to join with poly1 file
+cases_dis <- aggregate(cases ~ DISTCODE, FUN = sum, data = final)
+inci1k_dis <- aggregate(inci1k ~ DISTCODE, FUN = mean, data = final)
+raint_dis <- aggregate(raint ~ DISTCODE, FUN = mean, data = final)
+tavg_dis<-  aggregate(tavg ~ DISTCODE, FUN = mean, data = final)
+tavg4_dis<-  aggregate(tavg_lag_4 ~ DISTCODE, FUN = mean, data = final)
+
+##joining datasets to poly1
+poly1@data <- left_join(poly1@data, cases_dis, by="DISTCODE")
+poly1@data <- left_join(poly1@data, inci1k_dis, by="DISTCODE")
+poly1@data <- left_join(poly1@data, raint_dis, by="DISTCODE")
+poly1@data <- left_join(poly1@data, tavg_dis, by="DISTCODE")
+poly1@data <- left_join(poly1@data, tavg4_dis, by="DISTCODE")
+
+##comparing districcodes  in poly1 to cases_dis and inci1k_dis
+poly1$DISTCOD[!poly1$DISTCODE %in% cases_dis$DISTCODE]
+cases_dis$DISTCODE[!cases_dis$DISTCODE %in% poly1$DISTCODE]
+raint$DISTCODE[!raint$DISTCODE %in% poly1$DISTCODE]
+tavg_dis$DISTCODE[!tavg_dis$DISTCODE %in% poly1$DISTCODE]
+tavg4_dis$DISTCODE[!tavg4_dis$DISTCODE %in% poly1$DISTCODE]
+
+##trying qtm from tmap to view cases, incidence/100 and average side by side
+qtm(shp=poly1, fill=c("cases", "inci1k", "tavg", "tavg_lag_4"),  fill.palette= "Blues", ncol=4)
+
+##trying ggmap
+library(ggplot2)
+p<- ggplot(poly1@data, aes(inci1k, tavg))
+p
+p+geom_point(aes(color=tavg, size=inci1k))+ geom_text(size=2, aes(label=DISTCODE)) ##included in appendix
+
+
+
+
+##CODE BELOW WORKS BUT NOT INCLUDED IN FINAL REPORT
+tm_shape(poly1) +
+  tm_fill("cases", fill.title = "Total Malaria Cases by District",  scale = 0.8, alpha = 0.5,  title = "Total Malaria Cases by Districts")
+#+
+tm_shape(poly1) +
+  tm_fill("tavg", fill.title = "Average Temp by District (Celsius)", scale = 0.8, alpha = 0.5, title = "Average Temp by District (Celsius)")
+
+tm_shape(poly1) +
+  tm_fill("inci1k", fill.title = "Population Adjusted Incidence (Mean)", scale = 0.8, alpha = 0.5, title = "Population Adjusted Incidence (Mean)") 
+
+tm_shape(poly1) +
+  tm_fill("raint", fill.title = "Total Rain by District (Mean)", scale = 0.8, alpha = 0.5, title = "Total Rain by District (Mean)")
+
+spplot(poly1, "raint", col.regions = tempPal, cuts = 6, col = "transparent", main = "Rainfall total")
