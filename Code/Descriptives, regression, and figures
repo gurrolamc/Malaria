@@ -1,0 +1,271 @@
+### 2. MALARIA DESCRIPTIVES, POISSON AND FIGURES
+rm(list=ls())
+install.packages("sjPlot")
+install.packages("glmmTMB")
+install.packages("zoo")
+install.packages("broom")
+
+library(zoo)
+library(lme4)
+library(sjPlot)
+library(glmmTMB)
+library(broom)
+
+
+
+##load saved data
+load("/Volumes/Lexar/R & Python final project/weather")
+load("/Volumes/Lexar/R & Python final project/incidence")
+load("/Volumes/Lexar/R & Python final project/intervention")
+load("/Volumes/Lexar/R & Python final project/allmerged")
+load("/Volumes/Lexar/R & Python final project/poly1")
+
+merged <- final
+
+###PROVIDE DESCRIPTIVES OF DATA
+#######################################
+###INCIDENCE SUMMARY
+##incidence average by region
+cases_reg <- as.table(by(merged$cases, merged$Region, function (x) mean(x, na.rm=T)))
+print(cases_reg)
+
+##incidence average by region, year
+cases_regyr <- as.table(by(merged$cases, merged[c(2,11)], function (x) mean(x, na.rm=T)))
+print(cases_regyr)
+
+##incidence/1K average by region, year
+cases1K_regyr <- as.table(by(merged$inci1k, merged$Region, function (x) mean(x, na.rm=T)))
+print(cases1K_regyr)
+
+
+##incidence average by region, year, epiweek
+cases_regyrwk <- as.table(by(merged$cases, merged[c(2:3,11)], function (x) mean(x, na.rm=T)))
+print(cases_regyrwk)
+
+#######################################
+##INTERVENTION SUMMARY
+##ITN counts by region
+ITN_reg <- as.table(by(merged$ITNprotn, merged$Region, function (x) table(x)))
+print(ITN_reg)
+
+##ITN counts by region, year
+ITN_regyr <- as.table(by(merged[c(25,2)], merged[c(11)], function (x) table(x)))
+print(ITN_regyr)
+
+##IRS counts by region
+IRS_reg <- as.table(by(merged$IRSprotn, merged$Region, function (x) table(x)))
+print(IRS_reg)
+
+##IRS average by region, year
+IRS_regyr <- as.table(by(merged[c(24,2)], merged[c(11)], function (x) table(x)))
+print(IRS_regyr)
+
+###POISSON REGRESSION
+##REGRESSION WITH 2 WEEK LAG AND INTERVENTION
+glm2_wk <- glmer(cases ~ 1 + tavg + tavg_lag_2 + raint + raint_lag_2 + ITNprotn + IRSprotn + (1|District), offset=log(u5total), family=poisson, data=final)
+summary(glm2_wk)
+tidy(glm2_wk)
+
+##REGRESSION WITH 4 WEEK LAG AND INTERVENTION
+glm4_wk <- glmer(cases ~ 1 + tavg + tavg_lag_4 + raint + raint_lag_4 + ITNprotn + IRSprotn + (1|District), offset=log(u5total), family=poisson, data=final)
+summary(glm4_wk)
+tidy(glm4_wk)
+
+##REGRESSION WITH 8 WEEK LAG AND INTERVENTION
+glm8_wk <- glmer(cases ~ 1 + tavg + tavg_lag_8 + raint + raint_lag_8 + ITNprotn + IRSprotn + (1|District), offset=log(u5total), family=poisson, data=final)
+summary(glm8_wk)
+tidy(glm8_wk)
+
+plot_models(glm2_wk, glm4_wk, glm8_wk, std.est = "std2", 
+            legend.title = "Poisson Models", 
+            m.labels = c("Model 1", "Model 2", "Model 3"))
+
+#########NO LAG
+###
+### Weather data boxplots by year on one page ###
+##removing missing region values for graphing
+final1 <- as.data.frame(subset(final, !is.na(Region)))
+
+par(mfrow=c(3,2))
+boxplot(final1$raint ~ final1$Epiyear, ylim=c(0,20), xlab="Epidemiology Year", ylab="Total weekly rainfall (mm)", col="blue")
+boxplot(final1$tavg ~ final1$Epiyear, ylim=c(10,40), xlab="Epidemiology Year", ylab="Average weekly temperature (C)", col="red")
+boxplot(final1$sd ~ final1$Epiyear, ylim=c(0,30), xlab="Epidemiology Year", ylab="Saturation Vapor pressure deficit", col="yellow")
+boxplot(final1$psfc ~ final1$Epiyear, xlab="Epidemiology Year", ylab="Surface Barometric Pressure (hPa)", col="green")
+boxplot(final1$rh ~ final1$Epiyear, xlab="Epidemiology Year", ylab="Relative Humidity (%)", col="orange")
+
+### Splines by week, cases, and region ###
+par(mfrow=c(1,1))
+plot(smooth.spline(final1$Epiweek[final1$Region=="Center"], final1$cases[final1$Region=="Center"], df=4), type="l",
+     col="red", xlab="Epidemiology Week", ylab="Malaria Incidence", 
+     main="Malaria Incidence by Epidemiology Week \n and Region", ylim=c(19, 3000), lty=5, lwd=2)
+lines(smooth.spline(final1$Epiweek[final1$Region=="Coastal"], final1$cases[final1$Region=="Coastal"], df=4), type="l",
+      col="blue", lty=4, lwd=2)
+lines(smooth.spline(final1$Epiweek[final1$Region=="Northern"], final1$cases[final1$Region=="Northern"], df=4), type="l",
+      col="green", lty=3, lwd=2)
+lines(smooth.spline(final1$Epiweek[final1$Region=="Southern"], final1$cases[final1$Region=="Southern"], df=4), type="l",
+      col="purple", lty=2, lwd=2)
+legend("topright", c("Center", "Coastal", "Northern", "Southern"), 
+       text.col = c("red", "blue", "green", "purple"), lty=c(5,4,3,2), cex = 1, bty = "n", 
+       title.col="black", title="Region", lwd=2)
+
+### Splines by week, cases/1000, and region ###
+par(mfrow=c(1,1))
+plot(smooth.spline(final1$Epiweek[final1$Region=="Center"], final1$inci1k[final1$Region=="Center"], df=4), type="l",
+     col="red", xlab="Epidemiology Week", ylab="Malaria Incidence", 
+     main="Malaria Incidence per 1000 by Epidemiology Week \n and Region", ylim=c(19, 60), lty=5, lwd=2)
+lines(smooth.spline(final1$Epiweek[final1$Region=="Coastal"], final1$inci1k[final1$Region=="Coastal"], df=4), type="l",
+      col="blue", lty=4, lwd=2)
+lines(smooth.spline(final1$Epiweek[final1$Region=="Northern"], final1$inci1k[final1$Region=="Northern"], df=4), type="l",
+      col="green", lty=3, lwd=2)
+lines(smooth.spline(final1$Epiweek[final1$Region=="Southern"], final1$inci1k[final1$Region=="Southern"], df=4), type="l",
+      col="purple", lty=2, lwd=2)
+legend("topright", c("Center", "Coastal", "Northern", "Southern"), 
+       text.col = c("red", "blue", "green", "purple"), lty=c(5,4,3,2), cex = 1, bty = "n", 
+       title.col="black", title="Region", lwd=2)
+
+###scatter plot by temp, cases and region--quadrant
+par(mfrow=c(2,2))
+plot(final1$tavg[final1$Region=="Center"]~ final1$cases[final1$Region=="Center"], col="red", xlab="Total Malaria Cases", ylab="Average temperature (Celcius)", 
+     ylim=c(5, 45), xlim=c(0, 6400), lty=5, lwd=2)
+legend("topright", c("Center Region"), 
+       text.col = c("red"),  cex = 1, bty = "n") 
+plot(final1$tavg[final1$Region=="Coastal"]~ final1$cases[final1$Region=="Coastal"], col="blue",  xlab="Total Malaria Cases", ylab="Average temperature (Celcius)", 
+      ylim=c(5, 45),xlim=c(0, 6400), lty=5, lwd=2)
+legend("topright", c("Coastal Region"), 
+       text.col = c("blue"),  cex = 1, bty = "n") 
+plot(final1$tavg[final1$Region=="Northern"]~ final1$cases[final1$Region=="Northern"], col="green", xlab="Total Malaria Cases", ylab="Average temperature (Celcius)", 
+      ylim=c(5, 45), xlim=c(0, 6400),  lty=5, lwd=2)
+legend("topright", c("Northern Region"), 
+       text.col = c("green"),  cex = 1, bty = "n") 
+plot(final1$tavg[final1$Region=="Southern"]~ final1$cases[final1$Region=="Southern"], col="purple",  xlab="Total Malaria Cases", ylab="Average temperature (Celcius)", 
+      ylim=c(5, 45), xlim=c(0, 6400), lty=5, lwd=2)
+legend("topright", c("Southern Region"), 
+       text.col = c("purple"),  cex = 1, bty = "n") 
+
+###scatter plot by temp, cases/1000k and region--quadrant
+par(mfrow=c(2,2))
+plot(final1$tavg[final1$Region=="Center"]~ final1$inci1k[final1$Region=="Center"], col="red", xlab="Malaria Cases/1000", ylab="Average temperature (Celcius)", 
+      ylim=c(5, 45), xlim=c(0, 300), lty=5, lwd=2)
+legend("topright", c("Center Region"), 
+       text.col = c("red"),  cex = 1, bty = "n") 
+plot(final1$tavg[final1$Region=="Coastal"]~ final1$inci1k[final1$Region=="Coastal"], col="blue",  xlab="Malaria Cases/1000", ylab="Average temperature (Celcius)", 
+      ylim=c(5, 45),xlim=c(0, 300), lty=5, lwd=2)
+legend("topright", c("Coastal Region"), 
+       text.col = c("blue"),  cex = 1, bty = "n") 
+plot(final1$tavg[final1$Region=="Northern"]~ final1$inci1k[final1$Region=="Northern"], col="green", xlab="Malaria Cases/1000", ylab="Average temperature (Celcius)", 
+      ylim=c(5, 45), xlim=c(0, 300),  lty=5, lwd=2)
+legend("topright", c("Northern Region"), 
+       text.col = c("green"),  cex = 1, bty = "n") 
+plot(final1$tavg[final1$Region=="Southern"]~ final1$inci1k[final1$Region=="Southern"], col="purple",  xlab="Malaria Cases/1000", ylab="Average temperature (Celcius)", 
+      ylim=c(5, 45), xlim=c(0, 300), lty=5, lwd=2)
+legend("topright", c("Southern Region"), 
+       text.col = c("purple"),  cex = 1, bty = "n") 
+
+########LAGS
+## 2 week lag
+###NEED TO REMOVE NA VALUES IN ORDER TO USE SMOOTH.SPLINE
+final2 <- as.data.frame(subset(final1, !is.na(cases)))
+final3 <-as.data.frame(subset(final2, !is.na(tavg_lag_2)))
+
+###scatter plot by 2 week lag temp, cases and region
+##PREPARING TO GRAPH
+par(mfrow=c(1,1))
+plot(smooth.spline(final3$cases[final3$Region=="Center"], final3$tavg_lag_2[final3$Region=="Center"], df=4), type="l",
+     col="red", xlab="Total Malaria Cases", ylab="Average Temp (2 week lag)", 
+     ylim=c(15, 35), lty=5, lwd=2)
+lines(smooth.spline(final3$cases[final3$Region=="Coastal"], final3$tavg_lag_2[final3$Region=="Coastal"], df=4), type="l",
+      col="blue", lty=4, lwd=2)
+lines(smooth.spline(final3$cases[final3$Region=="Northern"], final3$tavg_lag_2[final3$Region=="Northern"], df=4), type="l",
+      col="green", lty=3, lwd=2)
+lines(smooth.spline(final3$cases[final3$Region=="Southern"], final3$tavg_lag_2[final3$Region=="Southern"], df=4), type="l",
+      col="purple", lty=2, lwd=2)
+legend("topright", c("Center", "Coastal", "Northern", "Southern"), 
+       text.col = c("red", "blue", "green", "purple"), lty=c(5,4,3,2), cex = 1, bty = "n", 
+       title.col="black", title="Region", lwd=2)
+
+### Splines by week, cases/1000, and region 4 WEEK LAG###
+par(mfrow=c(1,1))
+plot(smooth.spline(final3$inci1k[final3$Region=="Center"], final3$tavg_lag_2[final3$Region=="Center"], df=4), type="l",
+     col="red", xlab="Malaria Incidence", ylab="Average Temp (2 week lag)", 
+     ylim=c(15, 35), xlim=c(0, 310),lty=5, lwd=2)
+lines(smooth.spline(final3$inci1k[final3$Region=="Coastal"], final3$tavg_lag_2[final3$Region=="Coastal"], df=4), type="l",
+      col="blue", lty=4, lwd=2)
+lines(smooth.spline(final3$inci1k[final3$Region=="Northern"], final3$tavg_lag_2[final3$Region=="Northern"], df=4), type="l",
+      col="green", lty=3, lwd=2)
+lines(smooth.spline(final3$inci1k[final3$Region=="Southern"], final3$tavg_lag_2[final3$Region=="Southern"], df=4), type="l",
+      col="purple", lty=2, lwd=2)
+legend("topright", c("Center", "Coastal", "Northern", "Southern"), 
+       text.col = c("red", "blue", "green", "purple"), lty=c(5,4,3,2), cex = 1, bty = "n", 
+       title.col="black", title="Region", lwd=2)
+
+
+### Splines by week, cases, and region 4 WEEK LAG###
+###NEED TO REMOVE NA VALUES IN ORDER TO USE SMOOTH.SPLINE
+final2 <- as.data.frame(subset(final1, !is.na(cases)))
+final3 <-as.data.frame(subset(final2, !is.na(tavg_lag_4)))
+
+##PREPARING TO GRAPH
+par(mfrow=c(1,1))
+plot(smooth.spline(final3$cases[final3$Region=="Center"], final3$tavg_lag_4[final3$Region=="Center"], df=4), type="l",
+     col="red", xlab="Total Malaria Cases", ylab="Average Temp (4 week lag)", 
+      ylim=c(15, 35), lty=5, lwd=2)
+lines(smooth.spline(final3$cases[final3$Region=="Coastal"], final3$tavg_lag_4[final3$Region=="Coastal"], df=4), type="l",
+      col="blue", lty=4, lwd=2)
+lines(smooth.spline(final3$cases[final3$Region=="Northern"], final3$tavg_lag_4[final3$Region=="Northern"], df=4), type="l",
+      col="green", lty=3, lwd=2)
+lines(smooth.spline(final3$cases[final3$Region=="Southern"], final3$tavg_lag_4[final3$Region=="Southern"], df=4), type="l",
+      col="purple", lty=2, lwd=2)
+legend("topright", c("Center", "Coastal", "Northern", "Southern"), 
+       text.col = c("red", "blue", "green", "purple"), lty=c(5,4,3,2), cex = 1, bty = "n", 
+       title.col="black", title="Region", lwd=2)
+
+### Splines by week, cases/1000, and region 4 WEEK LAG###
+par(mfrow=c(1,1))
+plot(smooth.spline(final3$inci1k[final3$Region=="Center"], final3$tavg_lag_4[final3$Region=="Center"], df=4), type="l",
+     col="red", xlab="Malaria Incidence", ylab="Average Temp (4 week lag)", 
+     ylim=c(15, 35), xlim=c(0, 310),lty=5, lwd=2)
+lines(smooth.spline(final3$inci1k[final3$Region=="Coastal"], final3$tavg_lag_4[final3$Region=="Coastal"], df=4), type="l",
+      col="blue", lty=4, lwd=2)
+lines(smooth.spline(final3$inci1k[final3$Region=="Northern"], final3$tavg_lag_4[final3$Region=="Northern"], df=4), type="l",
+      col="green", lty=3, lwd=2)
+lines(smooth.spline(final3$inci1k[final3$Region=="Southern"], final3$tavg_lag_4[final3$Region=="Southern"], df=4), type="l",
+      col="purple", lty=2, lwd=2)
+legend("topright", c("Center", "Coastal", "Northern", "Southern"), 
+       text.col = c("red", "blue", "green", "purple"), lty=c(5,4,3,2), cex = 1, bty = "n", 
+       title.col="black", title="Region", lwd=2)
+
+
+### Splines by week, cases, and region 8 WEEK LAG###
+###NEED TO REMOVE NA VALUES IN ORDER TO USE SMOOTH.SPLINE
+final2 <- as.data.frame(subset(final1, !is.na(cases)))
+final3 <-as.data.frame(subset(final2, !is.na(tavg_lag_8)))
+
+##PREPARING TO GRAPH
+par(mfrow=c(1,1))
+plot(smooth.spline(final3$cases[final3$Region=="Center"], final3$tavg_lag_8[final3$Region=="Center"], df=4), type="l",
+     col="red", xlab="Total Malaria Cases", ylab="Average Temp (8 week lag)", 
+     ylim=c(15, 35), lty=5, lwd=2)
+lines(smooth.spline(final3$cases[final3$Region=="Coastal"], final3$tavg_lag_8[final3$Region=="Coastal"], df=4), type="l",
+      col="blue", lty=4, lwd=2)
+lines(smooth.spline(final3$cases[final3$Region=="Northern"], final3$tavg_lag_8[final3$Region=="Northern"], df=4), type="l",
+      col="green", lty=3, lwd=2)
+lines(smooth.spline(final3$cases[final3$Region=="Southern"], final3$tavg_lag_8[final3$Region=="Southern"], df=4), type="l",
+      col="purple", lty=2, lwd=2)
+legend("topright", c("Center", "Coastal", "Northern", "Southern"), 
+       text.col = c("red", "blue", "green", "purple"), lty=c(5,4,3,2), cex = 1, bty = "n", 
+       title.col="black", title="Region", lwd=2)
+
+### Splines by week, cases/1000, and region 8 WEEK LAG###
+par(mfrow=c(1,1))
+plot(smooth.spline(final3$inci1k[final3$Region=="Center"], final3$tavg_lag_8[final3$Region=="Center"], df=4), type="l",
+     col="red", xlab="Malaria Incidence", ylab="Average Temp (8 week lag)", 
+     ylim=c(15, 35), xlim=c(0, 310),lty=5, lwd=2)
+lines(smooth.spline(final3$inci1k[final3$Region=="Coastal"], final3$tavg_lag_8[final3$Region=="Coastal"], df=4), type="l",
+      col="blue", lty=4, lwd=2)
+lines(smooth.spline(final3$inci1k[final3$Region=="Northern"], final3$tavg_lag_8[final3$Region=="Northern"], df=4), type="l",
+      col="green", lty=3, lwd=2)
+lines(smooth.spline(final3$inci1k[final3$Region=="Southern"], final3$tavg_lag_8[final3$Region=="Southern"], df=4), type="l",
+      col="purple", lty=2, lwd=2)
+legend("topright", c("Center", "Coastal", "Northern", "Southern"), 
+       text.col = c("red", "blue", "green", "purple"), lty=c(5,4,3,2), cex = 1, bty = "n", 
+       title.col="black", title="Region", lwd=2)
